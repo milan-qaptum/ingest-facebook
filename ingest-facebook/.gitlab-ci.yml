@@ -1,0 +1,57 @@
+variables:
+ SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+ GIT_DEPTH: "0"
+sonarcloud-check:
+ stage: sonarcloud-check
+ image:
+   name: sonarsource/sonar-scanner-cli:latest
+   entrypoint: [""]
+ cache:
+   key: "${CI_JOB_NAME}"
+   paths:
+     - .sonar/cache
+ script:
+   - sonar-scanner
+ only:
+   - develop
+
+#services:
+#- docker:dind
+
+stages:
+  - sonarcloud-check
+  - build
+  - deploy
+
+
+build:
+  image: docker:latest
+  services:
+    - docker:dind
+  stage: build
+  script:
+    - docker login $ACR_REPO -u $ACR_USER -p $ACR_PASS
+    - docker build -f Dockerfile -t $IMAGE_NAME:latest -t $ACR_REPO/$IMAGE_NAME:$CI_COMMIT_SHA . &> docker-build.log
+    - docker push $ACR_REPO/$IMAGE_NAME:$CI_COMMIT_SHA
+  dependencies:
+    - sonarcloud-check
+  only:
+    - develop
+
+deploy:
+  image: docker:latest
+  stage: deploy
+  script:
+    - apk add git curl
+    - git clone https://$GIT_USER:$GIT_TOKEN@gitlab.com/intuaition-3-0/ingest-sources/ingest-facebook.git
+    - git config --global user.email "tenzin.lama@nepallink.net"
+    - git config --global user.name "intuaition-3-0"
+    - cd ingest-facebook
+    - git checkout develop
+    - sed -i "19d" k8s/web.yaml
+    - sed -i "/containers:/a \ \ \ \ \ \ - image:\ qaptum.azurecr.io/ingest-fb:$CI_COMMIT_SHA" k8s/web.yaml
+    - git add .; git commit -m '[skip ci] image update'; git push origin develop
+  dependencies:
+    - build
+  only:
+    - develop
